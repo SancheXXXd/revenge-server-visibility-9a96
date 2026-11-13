@@ -19,6 +19,15 @@
       return k + ':' + (Array.isArray(v) ? 'массив' : v === null ? 'null' : typeof v);
     }).join(', ');
   }
+  let itemDiagnostic = 'Ожидание отображения панели';
+  function structure(v, depth) {
+    if (v === null) return 'null';
+    if (Array.isArray(v)) return 'Array[' + v.length + '](' + (depth > 0 && v.length ? structure(v[0], depth - 1) : '') + ')';
+    if (typeof v !== 'object') return typeof v;
+    if (depth <= 0) return 'object';
+    const keys = Object.keys(v).slice(0, 12);
+    return '{' + keys.map(k => (/^\d{7,}$/.test(k) ? '[ID]' : k) + ':' + structure(v[k], depth - 1)).join(', ') + '}';
+  }
   function scanPanel() {
     const modules = vendetta.metro.modules || globalThis.modules;
     if (!modules) { diagnostic = 'Реестр модулей недоступен'; return; }
@@ -33,7 +42,22 @@
       try {
         const un = after('default', ex, (_args, ret) => {
           try {
-            diagnostic = 'Панель найдена. Верхний уровень: ' + shape(ret) + '\nlistProps: ' + shape(ret?.listProps) + '\nlistDataProps: ' + shape(ret?.listDataProps);
+            const data = ret?.listDataProps;
+            diagnostic = 'Панель найдена. sections: ' + structure(data?.sections, 3);
+            if (data && typeof data.renderItem === 'function') {
+              const original = data.renderItem;
+              const copy = Object.assign({}, data, {
+                renderItem: function (...args) {
+                  const result = original.apply(this, args);
+                  try {
+                    const p = result && result.props;
+                    itemDiagnostic = 'Аргументы: ' + structure(args, 3) + '\nРезультат: ' + structure(result, 2) + '\nСвойства: ' + structure(p, 2);
+                  } catch (_) {}
+                  return result;
+                }
+              });
+              return Object.assign({}, ret, { listDataProps: copy });
+            }
           } catch (_) {}
         });
         probes.push({ ex, un });
@@ -94,7 +118,7 @@
     });
     return h(RN.ScrollView,{style:{flex:1},contentContainerStyle:{padding:16}},
       h(RN.Text,{style:{color:'#b5bac1',marginBottom:8}},status),
-      h(RN.Text,{style:{color:'#b5bac1',marginBottom:16,fontSize:12}},'Диагностика (без названий и ID): ' + diagnostic),
+      h(RN.Text,{style:{color:'#b5bac1',marginBottom:16,fontSize:12}},'Диагностика (только структура): ' + diagnostic + '\n' + itemDiagnostic),
       guilds.length ? rows : h(RN.Text,{style:{color:'#b5bac1'}},'Серверы не найдены. Вернись в Discord и открой настройки ещё раз.')
     );
   }
