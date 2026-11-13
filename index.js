@@ -51,7 +51,7 @@
                   const result = original.apply(this, args);
                   try {
                     const p = result && result.props;
-                    itemDiagnostic = 'Аргументы: ' + structure(args, 3) + '\nРезультат: ' + structure(result, 2) + '\nСвойства: ' + structure(p, 2);
+                    itemDiagnostic = 'Аргументы: ' + args.slice(0, 4).map(x => structure(x, 2)).join(' | ') + '\nРезультат: ' + structure(result, 2) + '\nСвойства: ' + structure(p, 2);
                   } catch (_) {}
                   return result;
                 }
