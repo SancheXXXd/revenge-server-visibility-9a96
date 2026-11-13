@@ -7,6 +7,41 @@
   let unpatch = null;
   let attached = false;
   let matched = false;
+  let probes = [];
+  let timer = null;
+  let diagnostic = 'Поиск панели...';
+  function shape(value) {
+    if (value == null) return String(value);
+    if (Array.isArray(value)) return 'массив';
+    if (typeof value !== 'object') return typeof value;
+    return Object.keys(value).slice(0, 25).map(k => {
+      const v = value[k];
+      return k + ':' + (Array.isArray(v) ? 'массив' : v === null ? 'null' : typeof v);
+    }).join(', ');
+  }
+  function scanPanel() {
+    const modules = vendetta.metro.modules || globalThis.modules;
+    if (!modules) { diagnostic = 'Реестр модулей недоступен'; return; }
+    let found = 0;
+    for (const id in modules) {
+      const def = modules[id];
+      if (!def?.isInitialized) continue;
+      const ex = def.publicModule?.exports;
+      if (!ex || typeof ex.default !== 'function' || ex.default.name !== 'useGuildsBarProps') continue;
+      found++;
+      if (probes.some(p => p.ex === ex)) continue;
+      try {
+        const un = after('default', ex, (_args, ret) => {
+          try {
+            diagnostic = 'Панель найдена. Верхний уровень: ' + shape(ret) + '\nlistProps: ' + shape(ret?.listProps) + '\nlistDataProps: ' + shape(ret?.listDataProps);
+          } catch (_) {}
+        });
+        probes.push({ ex, un });
+      } catch (_) {}
+    }
+    if (probes.length && !diagnostic.startsWith('Панель найдена.')) diagnostic = 'Модуль панели найден, ожидается открытие списка серверов.';
+    else if (!found && !probes.length) diagnostic = 'Модуль useGuildsBarProps не найден.';
+  }
   if (!Array.isArray(storage.hiddenIds)) storage.hiddenIds = [];
 
   function filterTree(node, hidden) {
@@ -58,13 +93,15 @@
       );
     });
     return h(RN.ScrollView,{style:{flex:1},contentContainerStyle:{padding:16}},
-      h(RN.Text,{style:{color:'#b5bac1',marginBottom:16}},status),
+      h(RN.Text,{style:{color:'#b5bac1',marginBottom:8}},status),
+      h(RN.Text,{style:{color:'#b5bac1',marginBottom:16,fontSize:12}},'Диагностика (без названий и ID): ' + diagnostic),
       guilds.length ? rows : h(RN.Text,{style:{color:'#b5bac1'}},'Серверы не найдены. Вернись в Discord и открой настройки ещё раз.')
     );
   }
   return {
     onLoad() {
       attached = false; matched = false;
+      scanPanel(); let ticks = 0; timer = setInterval(() => { scanPanel(); if (++ticks >= 30 && timer) { clearInterval(timer); timer = null; } }, 1000);
       try {
         const module = findByName('GuildsConnected', false);
         if (module && typeof module.default === 'function') {
@@ -73,7 +110,7 @@
         } else vendetta.logger.warn('GuildsConnected не найден: интерфейс Discord мог измениться');
       } catch (e) { vendetta.logger.error('Не удалось подключить фильтр списка серверов', e); }
     },
-    onUnload() { if (unpatch) unpatch(); unpatch = null; attached = false; matched = false; },
+    onUnload() { if (timer) clearInterval(timer); timer = null; for (const p of probes) p.un(); probes = []; if (unpatch) unpatch(); unpatch = null; attached = false; matched = false; },
     settings: Settings
   };
 })()
